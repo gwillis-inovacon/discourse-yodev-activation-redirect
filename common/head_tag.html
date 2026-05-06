@@ -1,4 +1,4 @@
-<script type="text/discourse-plugin" version="1.10.0">
+<script type="text/discourse-plugin" version="0.8">
   // yoDEV Activation Redirect
   //
   // After a user clicks an email activation link, Discourse renders a "Welcome"
@@ -10,18 +10,27 @@
   // The homepage detects ?activated=1 and auto-starts OIDC sign-in, completing
   // the signup → activation → tier-selection flow.
 
+  console.log("[yoDEV-activation-redirect] script loaded (plugin API 0.8)");
+
   const HOMEPAGE_URL = settings.homepage_url;
   const REDIRECT_DELAY_MS = parseInt(settings.redirect_delay_ms, 10) || 1500;
   const WATCH_TIMEOUT_MS = parseInt(settings.watch_timeout_ms, 10) || 10000;
 
+  console.log(
+    "[yoDEV-activation-redirect] settings:",
+    "homepage_url=" + (HOMEPAGE_URL || "(empty)"),
+    "delay=" + REDIRECT_DELAY_MS + "ms",
+    "watchTimeout=" + WATCH_TIMEOUT_MS + "ms"
+  );
+
   function buildTargetUrl() {
     if (!HOMEPAGE_URL) return null;
-    // Strip any trailing slash so we don't end up with double slashes
     return HOMEPAGE_URL.replace(/\/+$/, "") + "/?activated=1";
   }
 
-  api.onPageChange((url) => {
+  function maybeHandleActivation(url) {
     if (!url || !url.startsWith("/u/activate-account/")) return;
+    console.log("[yoDEV-activation-redirect] activation page detected: " + url);
 
     const targetUrl = buildTargetUrl();
     if (!targetUrl) {
@@ -31,38 +40,52 @@
       return;
     }
 
-    // The activation page is rendered async (Ember route + template). Poll until
-    // the success indicator (Welcome / Finish button) appears, then override the
-    // destination and schedule the auto-redirect.
     let elapsed = 0;
     const pollIntervalMs = 200;
-    const intervalId = setInterval(() => {
+    const intervalId = setInterval(function () {
       elapsed += pollIntervalMs;
       if (elapsed >= WATCH_TIMEOUT_MS) {
+        console.warn(
+          "[yoDEV-activation-redirect] gave up waiting for Finish button after " +
+            WATCH_TIMEOUT_MS +
+            "ms"
+        );
         clearInterval(intervalId);
         return;
       }
-
-      // The Finish button has historically been #welcome-button; some Discourse
-      // versions render it as a primary button inside the activate-account view.
       const btn = document.querySelector(
         "#welcome-button, .activate-account .btn-primary, .activate-account a.btn"
       );
       if (!btn) return;
 
+      console.log(
+        "[yoDEV-activation-redirect] Finish button found; scheduling redirect to " +
+          targetUrl +
+          " in " +
+          REDIRECT_DELAY_MS +
+          "ms"
+      );
       clearInterval(intervalId);
-
-      // Override the button so a manual click also lands on the homepage
       try {
         btn.setAttribute("href", targetUrl);
       } catch (e) {
-        // Non-blocking; the auto-redirect below still runs
+        // Non-blocking
       }
-
-      // Schedule the auto-redirect
-      window.setTimeout(() => {
+      window.setTimeout(function () {
         window.location.href = targetUrl;
       }, REDIRECT_DELAY_MS);
     }, pollIntervalMs);
+  }
+
+  // Primary: page-change event — handles SPA navigation + most initial loads
+  api.onPageChange(function (url) {
+    maybeHandleActivation(url);
   });
+
+  // Fallback: also check the current URL once after a brief delay, in case
+  // onPageChange doesn't fire for an initial server-rendered page load
+  // (some Discourse versions / activation page configurations differ).
+  window.setTimeout(function () {
+    maybeHandleActivation(window.location.pathname);
+  }, 100);
 </script>

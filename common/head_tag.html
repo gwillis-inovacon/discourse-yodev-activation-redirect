@@ -1,91 +1,86 @@
-<script type="text/discourse-plugin" version="0.8">
-  // yoDEV Activation Redirect
-  //
-  // After a user clicks an email activation link, Discourse renders a "Welcome"
-  // page with a "Finish" button that defaults to the Discourse home. This script
-  // overrides that button to point at the yoDEV homepage instead, and auto-clicks
-  // it after a short delay so users who don't click manually still end up at the
-  // right place.
-  //
-  // The homepage detects ?activated=1 and auto-starts OIDC sign-in, completing
-  // the signup → activation → tier-selection flow.
+<script>
+  (function () {
+    // yoDEV Activation Redirect — plain-script variant.
+    //
+    // Uses ERB interpolation to bake theme settings into the script at render
+    // time, so it works on both Ember-routed and server-rendered Discourse
+    // pages (the activation success page can be either depending on Discourse
+    // version, and plugin-API scripts only run on Ember pages).
 
-  console.log("[yoDEV-activation-redirect] script loaded (plugin API 0.8)");
+    var HOMEPAGE_URL = "<%= setting('homepage_url') %>";
+    var REDIRECT_DELAY_MS = parseInt("<%= setting('redirect_delay_ms') %>", 10) || 1500;
+    var WATCH_TIMEOUT_MS = parseInt("<%= setting('watch_timeout_ms') %>", 10) || 10000;
 
-  const HOMEPAGE_URL = settings.homepage_url;
-  const REDIRECT_DELAY_MS = parseInt(settings.redirect_delay_ms, 10) || 1500;
-  const WATCH_TIMEOUT_MS = parseInt(settings.watch_timeout_ms, 10) || 10000;
+    console.log("[yoDEV-activation-redirect] script loaded (plain-script variant)");
+    console.log(
+      "[yoDEV-activation-redirect] settings: homepage_url=" +
+        (HOMEPAGE_URL || "(empty)") +
+        " delay=" +
+        REDIRECT_DELAY_MS +
+        "ms watchTimeout=" +
+        WATCH_TIMEOUT_MS +
+        "ms"
+    );
 
-  console.log(
-    "[yoDEV-activation-redirect] settings:",
-    "homepage_url=" + (HOMEPAGE_URL || "(empty)"),
-    "delay=" + REDIRECT_DELAY_MS + "ms",
-    "watchTimeout=" + WATCH_TIMEOUT_MS + "ms"
-  );
-
-  function buildTargetUrl() {
-    if (!HOMEPAGE_URL) return null;
-    return HOMEPAGE_URL.replace(/\/+$/, "") + "/?activated=1";
-  }
-
-  function maybeHandleActivation(url) {
-    if (!url || !url.startsWith("/u/activate-account/")) return;
-    console.log("[yoDEV-activation-redirect] activation page detected: " + url);
-
-    const targetUrl = buildTargetUrl();
-    if (!targetUrl) {
-      console.warn(
-        "[yoDEV-activation-redirect] homepage_url theme setting is empty; not redirecting"
-      );
-      return;
+    function buildTargetUrl() {
+      if (!HOMEPAGE_URL) return null;
+      return HOMEPAGE_URL.replace(/\/+$/, "") + "/?activated=1";
     }
 
-    let elapsed = 0;
-    const pollIntervalMs = 200;
-    const intervalId = setInterval(function () {
-      elapsed += pollIntervalMs;
-      if (elapsed >= WATCH_TIMEOUT_MS) {
+    function maybeHandleActivation() {
+      var path = window.location.pathname || "";
+      if (path.indexOf("/u/activate-account/") !== 0) return;
+      console.log("[yoDEV-activation-redirect] activation page detected: " + path);
+
+      var targetUrl = buildTargetUrl();
+      if (!targetUrl) {
         console.warn(
-          "[yoDEV-activation-redirect] gave up waiting for Finish button after " +
-            WATCH_TIMEOUT_MS +
+          "[yoDEV-activation-redirect] homepage_url theme setting is empty; not redirecting"
+        );
+        return;
+      }
+
+      var elapsed = 0;
+      var pollIntervalMs = 200;
+      var intervalId = setInterval(function () {
+        elapsed += pollIntervalMs;
+        if (elapsed >= WATCH_TIMEOUT_MS) {
+          console.warn(
+            "[yoDEV-activation-redirect] gave up waiting for Finish button after " +
+              WATCH_TIMEOUT_MS +
+              "ms"
+          );
+          clearInterval(intervalId);
+          return;
+        }
+        var btn = document.querySelector(
+          "#welcome-button, .activate-account .btn-primary, .activate-account a.btn"
+        );
+        if (!btn) return;
+
+        console.log(
+          "[yoDEV-activation-redirect] Finish button found; scheduling redirect to " +
+            targetUrl +
+            " in " +
+            REDIRECT_DELAY_MS +
             "ms"
         );
         clearInterval(intervalId);
-        return;
-      }
-      const btn = document.querySelector(
-        "#welcome-button, .activate-account .btn-primary, .activate-account a.btn"
-      );
-      if (!btn) return;
+        try {
+          btn.setAttribute("href", targetUrl);
+        } catch (e) {
+          // Non-blocking
+        }
+        window.setTimeout(function () {
+          window.location.href = targetUrl;
+        }, REDIRECT_DELAY_MS);
+      }, pollIntervalMs);
+    }
 
-      console.log(
-        "[yoDEV-activation-redirect] Finish button found; scheduling redirect to " +
-          targetUrl +
-          " in " +
-          REDIRECT_DELAY_MS +
-          "ms"
-      );
-      clearInterval(intervalId);
-      try {
-        btn.setAttribute("href", targetUrl);
-      } catch (e) {
-        // Non-blocking
-      }
-      window.setTimeout(function () {
-        window.location.href = targetUrl;
-      }, REDIRECT_DELAY_MS);
-    }, pollIntervalMs);
-  }
-
-  // Primary: page-change event — handles SPA navigation + most initial loads
-  api.onPageChange(function (url) {
-    maybeHandleActivation(url);
-  });
-
-  // Fallback: also check the current URL once after a brief delay, in case
-  // onPageChange doesn't fire for an initial server-rendered page load
-  // (some Discourse versions / activation page configurations differ).
-  window.setTimeout(function () {
-    maybeHandleActivation(window.location.pathname);
-  }, 100);
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", maybeHandleActivation);
+    } else {
+      maybeHandleActivation();
+    }
+  })();
 </script>

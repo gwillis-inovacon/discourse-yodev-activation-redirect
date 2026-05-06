@@ -1,21 +1,31 @@
 <script>
   (function () {
-    // yoDEV Activation Redirect — plain script + CSS-variable settings.
+    // yoDEV Activation Redirect — localStorage handoff variant.
     //
-    // <script type="text/discourse-plugin"> doesn't execute on this Discourse
-    // setup (verified via missing console output on /latest), so we use a plain
-    // <script> for execution and read theme settings from CSS custom properties
-    // populated by common.scss via SCSS interpolation.
+    // On Greg's Discourse v2026.5 setup, clicking "Activate Account" navigates
+    // straight to / without rendering a separate /u/activate-account welcome
+    // page. So polling for #welcome-button never finds anything. Instead:
+    //
+    //   1. On the pre-activation page, hook the form/button click and set a
+    //      localStorage flag with a timestamp.
+    //   2. On the next page the user lands on (typically / after activation),
+    //      check the flag, and if it's recent, redirect to the homepage.
+    //
+    // The flag expires after 5 minutes so a forgotten flag doesn't bounce
+    // users on later visits. Settings come from CSS custom properties
+    // populated by common.scss (via SCSS interpolation).
 
     console.log(
       "[yoDEV-activation-redirect] script loaded on " + window.location.pathname
     );
 
+    var FLAG_KEY = "yodev_activation_pending";
+    var FLAG_MAX_AGE_MS = 5 * 60 * 1000; // 5 minutes
+
     function readCssVarString(name) {
       var v = (
         getComputedStyle(document.documentElement).getPropertyValue(name) || ""
       ).trim();
-      // CSS interpolation wraps string values in quotes; strip them
       return v.replace(/^["']|["']$/g, "");
     }
 
@@ -32,11 +42,7 @@
         homepageUrl: readCssVarString("--yodev-activation-redirect-homepage-url"),
         redirectDelayMs: readCssVarInt(
           "--yodev-activation-redirect-delay-ms",
-          1500
-        ),
-        watchTimeoutMs: readCssVarInt(
-          "--yodev-activation-redirect-watch-timeout-ms",
-          10000
+          0
         ),
       };
     }
@@ -46,87 +52,170 @@
       return homepageUrl.replace(/\/+$/, "") + "/?activated=1";
     }
 
-    function maybeHandleActivation() {
-      var path = window.location.pathname || "";
-      if (path.indexOf("/u/activate-account/") !== 0) return;
+    function checkPendingFlag() {
+      var raw = null;
+      try {
+        raw = localStorage.getItem(FLAG_KEY);
+      } catch (e) {
+        return; // localStorage unavailable
+      }
+      if (!raw) return;
+
+      var data;
+      try {
+        data = JSON.parse(raw);
+      } catch (e) {
+        try {
+          localStorage.removeItem(FLAG_KEY);
+        } catch (e2) {}
+        return;
+      }
+
+      // Always consume the flag — whether we honor it or not, we don't want
+      // it sticking around for an unrelated future visit.
+      try {
+        localStorage.removeItem(FLAG_KEY);
+      } catch (e) {}
+
+      var age = Date.now() - (data.timestamp || 0);
+      if (age > FLAG_MAX_AGE_MS) {
+        console.log(
+          "[yoDEV-activation-redirect] activation flag expired (" +
+            age +
+            "ms old); ignoring"
+        );
+        return;
+      }
 
       var s = readSettings();
       console.log(
-        "[yoDEV-activation-redirect] activation URL detected: " +
-          path +
-          " — waiting for user to click 'Activate Account' and reach the welcome state",
+        "[yoDEV-activation-redirect] activation flag detected (" +
+          age +
+          "ms old); settings:",
         s
       );
 
       var targetUrl = buildTargetUrl(s.homepageUrl);
       if (!targetUrl) {
         console.warn(
-          "[yoDEV-activation-redirect] homepage_url empty (CSS var not set); not redirecting"
+          "[yoDEV-activation-redirect] homepage_url empty; not redirecting"
         );
         return;
       }
 
-      var elapsed = 0;
-      var pollIntervalMs = 200;
-      var intervalId = setInterval(function () {
-        elapsed += pollIntervalMs;
-        if (elapsed >= s.watchTimeoutMs) {
-          console.warn(
-            "[yoDEV-activation-redirect] gave up waiting for welcome state after " +
-              s.watchTimeoutMs +
-              "ms (user may not have clicked 'Activate Account', or selector doesn't match this Discourse version's welcome page)"
-          );
-          clearInterval(intervalId);
-          return;
-        }
+      console.log(
+        "[yoDEV-activation-redirect] redirecting to " +
+          targetUrl +
+          (s.redirectDelayMs > 0
+            ? " in " + s.redirectDelayMs + "ms"
+            : " immediately")
+      );
 
-        // Match ONLY post-activation indicators. Specifically NOT the pre-activation
-        // .btn-primary inside the activation form, which would cause an early redirect
-        // before the user has clicked 'Activate Account'.
-        var welcomeBtn = document.querySelector("#welcome-button");
-        if (!welcomeBtn) return;
-
-        console.log(
-          "[yoDEV-activation-redirect] #welcome-button found = activation complete; redirecting to " +
-            targetUrl +
-            (s.redirectDelayMs > 0
-              ? " in " + s.redirectDelayMs + "ms"
-              : " immediately")
-        );
-        clearInterval(intervalId);
-        try {
-          welcomeBtn.setAttribute("href", targetUrl);
-        } catch (e) {
-          // Non-blocking
-        }
-        // Race: Discourse's welcome page has its own auto-redirect to /. If our
-        // delay is too long, Discourse navigates away before our setTimeout fires
-        // and our pending redirect never executes. With delay=0 we navigate
-        // synchronously and win.
-        if (s.redirectDelayMs > 0) {
-          window.setTimeout(function () {
-            window.location.href = targetUrl;
-          }, s.redirectDelayMs);
-        } else {
+      if (s.redirectDelayMs > 0) {
+        window.setTimeout(function () {
           window.location.href = targetUrl;
-        }
-      }, pollIntervalMs);
+        }, s.redirectDelayMs);
+      } else {
+        window.location.href = targetUrl;
+      }
     }
 
-    // Sanity-log the settings as soon as the stylesheet is applied so we can
-    // confirm CSS-var interpolation worked, even on non-activation pages.
-    function logSettingsOnce() {
-      console.log("[yoDEV-activation-redirect] settings (from CSS vars):", readSettings());
+    function setActivationFlag() {
+      try {
+        localStorage.setItem(
+          FLAG_KEY,
+          JSON.stringify({ timestamp: Date.now() })
+        );
+        console.log(
+          "[yoDEV-activation-redirect] activation flag set; will redirect on next page load"
+        );
+      } catch (e) {
+        console.warn(
+          "[yoDEV-activation-redirect] could not write to localStorage:",
+          e
+        );
+      }
+    }
+
+    function attachActivationListener() {
+      // Look for the Activate Account button. Discourse renders it as a
+      // <button> inside the activate-account section; older versions used
+      // a <form>, newer ones may use an Ember-managed click handler with
+      // a button.
+      var btn = document.querySelector(
+        "button.activate-account, " +
+          ".activate-account button.btn-primary, " +
+          ".activate-account button, " +
+          "form.activate-account button[type=submit], " +
+          "form[action*='activate-account'] button"
+      );
+      var form = document.querySelector(
+        "form.activate-account, form[action*='activate-account']"
+      );
+
+      if (form) {
+        form.addEventListener("submit", setActivationFlag, { once: true });
+        console.log(
+          "[yoDEV-activation-redirect] hooked form submit listener"
+        );
+        return true;
+      }
+      if (btn) {
+        btn.addEventListener("click", setActivationFlag, { once: true });
+        console.log(
+          "[yoDEV-activation-redirect] hooked button click listener"
+        );
+        return true;
+      }
+      return false;
+    }
+
+    function handlePreActivationPage() {
+      var path = window.location.pathname || "";
+      if (path.indexOf("/u/activate-account/") !== 0) return;
+      console.log(
+        "[yoDEV-activation-redirect] pre-activation URL detected: " +
+          path +
+          " — installing click/submit listener"
+      );
+
+      // Try immediately, then poll briefly for the button to appear (the form
+      // is often rendered after Ember finishes routing).
+      if (attachActivationListener()) return;
+      var elapsed = 0;
+      var pollInterval = 200;
+      var maxPollMs = 15000;
+      var intervalId = setInterval(function () {
+        elapsed += pollInterval;
+        if (elapsed >= maxPollMs || attachActivationListener()) {
+          if (elapsed >= maxPollMs) {
+            console.warn(
+              "[yoDEV-activation-redirect] gave up looking for Activate button after " +
+                maxPollMs +
+                "ms (selector may not match this Discourse version)"
+            );
+          }
+          clearInterval(intervalId);
+        }
+      }, pollInterval);
+    }
+
+    function init() {
+      var s = readSettings();
+      console.log("[yoDEV-activation-redirect] settings (from CSS vars):", s);
+
+      // First: did we just complete activation and land here? Redirect.
+      checkPendingFlag();
+
+      // If still here (no flag, or expired), and we're on the pre-activation
+      // page, install the click/submit listener so the next click sets the flag.
+      handlePreActivationPage();
     }
 
     if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", function () {
-        logSettingsOnce();
-        maybeHandleActivation();
-      });
+      document.addEventListener("DOMContentLoaded", init);
     } else {
-      logSettingsOnce();
-      maybeHandleActivation();
+      init();
     }
   })();
 </script>

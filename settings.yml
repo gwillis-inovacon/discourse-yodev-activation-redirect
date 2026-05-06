@@ -2,7 +2,7 @@ homepage_url:
   type: string
   default: ""
   description:
-    en: "URL of the yoDEV homepage to redirect users to after email activation. Include protocol and host (e.g., https://www.yodev.dev or https://development.yodev.dev). The component appends ?activated=1 so the homepage can detect the post-activation arrival."
+    en: "URL of the yoDEV HOMEPAGE app (NOT the Discourse host) where users should be sent after email activation. The homepage is a separate web app that handles signup, plan selection, and post-activation OIDC sign-in. Include protocol and host (e.g., https://homepage-dev.up.railway.app for the Railway dev deploy, or whatever URL your Vite/Next homepage is served from in production). The component appends /?activated=1 so the homepage's App.tsx handler can detect the post-activation arrival and auto-start OIDC."
 
 redirect_delay_ms:
   type: integer

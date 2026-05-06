@@ -14,8 +14,8 @@ redirect_delay_ms:
 
 watch_timeout_ms:
   type: integer
-  default: 10000
+  default: 60000
   min: 1000
-  max: 60000
+  max: 300000
   description:
-    en: "Maximum time to wait for the activation success indicator to appear before giving up (e.g., on failure pages). Default 10s."
+    en: "Maximum time to poll for the post-activation welcome state (#welcome-button) before giving up. Polling starts when the user lands on /u/activate-account/<token>; the user has to actually click 'Activate Account' first, which takes some time. Default 60s. If the user takes longer than this to click, polling stops — but they'll still land back here on the welcome page after they do click, and the script restarts then. Increase if your users tend to leave the activation tab open before clicking."

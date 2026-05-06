@@ -52,7 +52,9 @@
 
       var s = readSettings();
       console.log(
-        "[yoDEV-activation-redirect] activation page detected: " + path,
+        "[yoDEV-activation-redirect] activation URL detected: " +
+          path +
+          " — waiting for user to click 'Activate Account' and reach the welcome state",
         s
       );
 
@@ -70,20 +72,22 @@
         elapsed += pollIntervalMs;
         if (elapsed >= s.watchTimeoutMs) {
           console.warn(
-            "[yoDEV-activation-redirect] gave up waiting for Finish button after " +
+            "[yoDEV-activation-redirect] gave up waiting for welcome state after " +
               s.watchTimeoutMs +
-              "ms"
+              "ms (user may not have clicked 'Activate Account', or selector doesn't match this Discourse version's welcome page)"
           );
           clearInterval(intervalId);
           return;
         }
-        var btn = document.querySelector(
-          "#welcome-button, .activate-account .btn-primary, .activate-account a.btn"
-        );
-        if (!btn) return;
+
+        // Match ONLY post-activation indicators. Specifically NOT the pre-activation
+        // .btn-primary inside the activation form, which would cause an early redirect
+        // before the user has clicked 'Activate Account'.
+        var welcomeBtn = document.querySelector("#welcome-button");
+        if (!welcomeBtn) return;
 
         console.log(
-          "[yoDEV-activation-redirect] Finish button found; scheduling redirect to " +
+          "[yoDEV-activation-redirect] #welcome-button found = activation complete; scheduling redirect to " +
             targetUrl +
             " in " +
             s.redirectDelayMs +
@@ -91,7 +95,7 @@
         );
         clearInterval(intervalId);
         try {
-          btn.setAttribute("href", targetUrl);
+          welcomeBtn.setAttribute("href", targetUrl);
         } catch (e) {
           // Non-blocking
         }

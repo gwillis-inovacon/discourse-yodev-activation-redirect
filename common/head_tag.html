@@ -1,86 +1,90 @@
 <script>
-  (function () {
-    // yoDEV Activation Redirect — plain-script variant.
-    //
-    // Uses ERB interpolation to bake theme settings into the script at render
-    // time, so it works on both Ember-routed and server-rendered Discourse
-    // pages (the activation success page can be either depending on Discourse
-    // version, and plugin-API scripts only run on Ember pages).
+  // Plain-script tracer — confirms head_tag is being injected at all on this
+  // page type. Will log on every page that uses the theme.
+  console.log("[yoDEV-activation-redirect] plain-script tracer: loaded on " + window.location.pathname);
+</script>
 
-    var HOMEPAGE_URL = "<%= setting('homepage_url') %>";
-    var REDIRECT_DELAY_MS = parseInt("<%= setting('redirect_delay_ms') %>", 10) || 1500;
-    var WATCH_TIMEOUT_MS = parseInt("<%= setting('watch_timeout_ms') %>", 10) || 10000;
+<script type="text/discourse-plugin" version="0.8">
+  // Plugin-API script — has access to theme settings via the `settings` global.
+  // Only runs on pages where Discourse's Ember app has initialized.
+  console.log("[yoDEV-activation-redirect] plugin-API script: loaded on " + window.location.pathname);
 
-    console.log("[yoDEV-activation-redirect] script loaded (plain-script variant)");
-    console.log(
-      "[yoDEV-activation-redirect] settings: homepage_url=" +
-        (HOMEPAGE_URL || "(empty)") +
-        " delay=" +
-        REDIRECT_DELAY_MS +
-        "ms watchTimeout=" +
-        WATCH_TIMEOUT_MS +
-        "ms"
-    );
+  const HOMEPAGE_URL = settings.homepage_url;
+  const REDIRECT_DELAY_MS = parseInt(settings.redirect_delay_ms, 10) || 1500;
+  const WATCH_TIMEOUT_MS = parseInt(settings.watch_timeout_ms, 10) || 10000;
 
-    function buildTargetUrl() {
-      if (!HOMEPAGE_URL) return null;
-      return HOMEPAGE_URL.replace(/\/+$/, "") + "/?activated=1";
+  console.log(
+    "[yoDEV-activation-redirect] settings: homepage_url=" +
+      (HOMEPAGE_URL || "(empty)") +
+      " delay=" +
+      REDIRECT_DELAY_MS +
+      "ms watchTimeout=" +
+      WATCH_TIMEOUT_MS +
+      "ms"
+  );
+
+  function buildTargetUrl() {
+    if (!HOMEPAGE_URL) return null;
+    return HOMEPAGE_URL.replace(/\/+$/, "") + "/?activated=1";
+  }
+
+  function maybeHandleActivation(url) {
+    if (!url || url.indexOf("/u/activate-account/") !== 0) return;
+    console.log("[yoDEV-activation-redirect] activation page detected: " + url);
+
+    const targetUrl = buildTargetUrl();
+    if (!targetUrl) {
+      console.warn(
+        "[yoDEV-activation-redirect] homepage_url theme setting is empty; not redirecting"
+      );
+      return;
     }
 
-    function maybeHandleActivation() {
-      var path = window.location.pathname || "";
-      if (path.indexOf("/u/activate-account/") !== 0) return;
-      console.log("[yoDEV-activation-redirect] activation page detected: " + path);
-
-      var targetUrl = buildTargetUrl();
-      if (!targetUrl) {
+    let elapsed = 0;
+    const pollIntervalMs = 200;
+    const intervalId = setInterval(function () {
+      elapsed += pollIntervalMs;
+      if (elapsed >= WATCH_TIMEOUT_MS) {
         console.warn(
-          "[yoDEV-activation-redirect] homepage_url theme setting is empty; not redirecting"
-        );
-        return;
-      }
-
-      var elapsed = 0;
-      var pollIntervalMs = 200;
-      var intervalId = setInterval(function () {
-        elapsed += pollIntervalMs;
-        if (elapsed >= WATCH_TIMEOUT_MS) {
-          console.warn(
-            "[yoDEV-activation-redirect] gave up waiting for Finish button after " +
-              WATCH_TIMEOUT_MS +
-              "ms"
-          );
-          clearInterval(intervalId);
-          return;
-        }
-        var btn = document.querySelector(
-          "#welcome-button, .activate-account .btn-primary, .activate-account a.btn"
-        );
-        if (!btn) return;
-
-        console.log(
-          "[yoDEV-activation-redirect] Finish button found; scheduling redirect to " +
-            targetUrl +
-            " in " +
-            REDIRECT_DELAY_MS +
+          "[yoDEV-activation-redirect] gave up waiting for Finish button after " +
+            WATCH_TIMEOUT_MS +
             "ms"
         );
         clearInterval(intervalId);
-        try {
-          btn.setAttribute("href", targetUrl);
-        } catch (e) {
-          // Non-blocking
-        }
-        window.setTimeout(function () {
-          window.location.href = targetUrl;
-        }, REDIRECT_DELAY_MS);
-      }, pollIntervalMs);
-    }
+        return;
+      }
+      const btn = document.querySelector(
+        "#welcome-button, .activate-account .btn-primary, .activate-account a.btn"
+      );
+      if (!btn) return;
 
-    if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", maybeHandleActivation);
-    } else {
-      maybeHandleActivation();
-    }
-  })();
+      console.log(
+        "[yoDEV-activation-redirect] Finish button found; scheduling redirect to " +
+          targetUrl +
+          " in " +
+          REDIRECT_DELAY_MS +
+          "ms"
+      );
+      clearInterval(intervalId);
+      try {
+        btn.setAttribute("href", targetUrl);
+      } catch (e) {
+        // Non-blocking
+      }
+      window.setTimeout(function () {
+        window.location.href = targetUrl;
+      }, REDIRECT_DELAY_MS);
+    }, pollIntervalMs);
+  }
+
+  // Primary: page-change event for SPA navigation + most initial loads
+  api.onPageChange(function (url) {
+    maybeHandleActivation(url);
+  });
+
+  // Fallback: also run once after script load in case onPageChange skips the
+  // initial server-rendered page load
+  window.setTimeout(function () {
+    maybeHandleActivation(window.location.pathname);
+  }, 100);
 </script>

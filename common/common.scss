@@ -1,0 +1,9 @@
+// Pass theme settings to head_tag.html's plain <script> via CSS custom
+// properties. SCSS interpolation works in Discourse theme components
+// (#{$setting_name}), unlike ERB in head_tag.html.
+
+:root {
+  --yodev-activation-redirect-homepage-url: "#{$homepage_url}";
+  --yodev-activation-redirect-delay-ms: #{$redirect_delay_ms};
+  --yodev-activation-redirect-watch-timeout-ms: #{$watch_timeout_ms};
+}

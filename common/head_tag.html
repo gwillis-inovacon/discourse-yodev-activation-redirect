@@ -1,90 +1,120 @@
 <script>
-  // Plain-script tracer — confirms head_tag is being injected at all on this
-  // page type. Will log on every page that uses the theme.
-  console.log("[yoDEV-activation-redirect] plain-script tracer: loaded on " + window.location.pathname);
-</script>
+  (function () {
+    // yoDEV Activation Redirect — plain script + CSS-variable settings.
+    //
+    // <script type="text/discourse-plugin"> doesn't execute on this Discourse
+    // setup (verified via missing console output on /latest), so we use a plain
+    // <script> for execution and read theme settings from CSS custom properties
+    // populated by common.scss via SCSS interpolation.
 
-<script type="text/discourse-plugin" version="0.8">
-  // Plugin-API script — has access to theme settings via the `settings` global.
-  // Only runs on pages where Discourse's Ember app has initialized.
-  console.log("[yoDEV-activation-redirect] plugin-API script: loaded on " + window.location.pathname);
+    console.log(
+      "[yoDEV-activation-redirect] script loaded on " + window.location.pathname
+    );
 
-  const HOMEPAGE_URL = settings.homepage_url;
-  const REDIRECT_DELAY_MS = parseInt(settings.redirect_delay_ms, 10) || 1500;
-  const WATCH_TIMEOUT_MS = parseInt(settings.watch_timeout_ms, 10) || 10000;
-
-  console.log(
-    "[yoDEV-activation-redirect] settings: homepage_url=" +
-      (HOMEPAGE_URL || "(empty)") +
-      " delay=" +
-      REDIRECT_DELAY_MS +
-      "ms watchTimeout=" +
-      WATCH_TIMEOUT_MS +
-      "ms"
-  );
-
-  function buildTargetUrl() {
-    if (!HOMEPAGE_URL) return null;
-    return HOMEPAGE_URL.replace(/\/+$/, "") + "/?activated=1";
-  }
-
-  function maybeHandleActivation(url) {
-    if (!url || url.indexOf("/u/activate-account/") !== 0) return;
-    console.log("[yoDEV-activation-redirect] activation page detected: " + url);
-
-    const targetUrl = buildTargetUrl();
-    if (!targetUrl) {
-      console.warn(
-        "[yoDEV-activation-redirect] homepage_url theme setting is empty; not redirecting"
-      );
-      return;
+    function readCssVarString(name) {
+      var v = (
+        getComputedStyle(document.documentElement).getPropertyValue(name) || ""
+      ).trim();
+      // CSS interpolation wraps string values in quotes; strip them
+      return v.replace(/^["']|["']$/g, "");
     }
 
-    let elapsed = 0;
-    const pollIntervalMs = 200;
-    const intervalId = setInterval(function () {
-      elapsed += pollIntervalMs;
-      if (elapsed >= WATCH_TIMEOUT_MS) {
+    function readCssVarInt(name, defaultValue) {
+      var v = (
+        getComputedStyle(document.documentElement).getPropertyValue(name) || ""
+      ).trim();
+      var n = parseInt(v, 10);
+      return isNaN(n) ? defaultValue : n;
+    }
+
+    function readSettings() {
+      return {
+        homepageUrl: readCssVarString("--yodev-activation-redirect-homepage-url"),
+        redirectDelayMs: readCssVarInt(
+          "--yodev-activation-redirect-delay-ms",
+          1500
+        ),
+        watchTimeoutMs: readCssVarInt(
+          "--yodev-activation-redirect-watch-timeout-ms",
+          10000
+        ),
+      };
+    }
+
+    function buildTargetUrl(homepageUrl) {
+      if (!homepageUrl) return null;
+      return homepageUrl.replace(/\/+$/, "") + "/?activated=1";
+    }
+
+    function maybeHandleActivation() {
+      var path = window.location.pathname || "";
+      if (path.indexOf("/u/activate-account/") !== 0) return;
+
+      var s = readSettings();
+      console.log(
+        "[yoDEV-activation-redirect] activation page detected: " + path,
+        s
+      );
+
+      var targetUrl = buildTargetUrl(s.homepageUrl);
+      if (!targetUrl) {
         console.warn(
-          "[yoDEV-activation-redirect] gave up waiting for Finish button after " +
-            WATCH_TIMEOUT_MS +
+          "[yoDEV-activation-redirect] homepage_url empty (CSS var not set); not redirecting"
+        );
+        return;
+      }
+
+      var elapsed = 0;
+      var pollIntervalMs = 200;
+      var intervalId = setInterval(function () {
+        elapsed += pollIntervalMs;
+        if (elapsed >= s.watchTimeoutMs) {
+          console.warn(
+            "[yoDEV-activation-redirect] gave up waiting for Finish button after " +
+              s.watchTimeoutMs +
+              "ms"
+          );
+          clearInterval(intervalId);
+          return;
+        }
+        var btn = document.querySelector(
+          "#welcome-button, .activate-account .btn-primary, .activate-account a.btn"
+        );
+        if (!btn) return;
+
+        console.log(
+          "[yoDEV-activation-redirect] Finish button found; scheduling redirect to " +
+            targetUrl +
+            " in " +
+            s.redirectDelayMs +
             "ms"
         );
         clearInterval(intervalId);
-        return;
-      }
-      const btn = document.querySelector(
-        "#welcome-button, .activate-account .btn-primary, .activate-account a.btn"
-      );
-      if (!btn) return;
+        try {
+          btn.setAttribute("href", targetUrl);
+        } catch (e) {
+          // Non-blocking
+        }
+        window.setTimeout(function () {
+          window.location.href = targetUrl;
+        }, s.redirectDelayMs);
+      }, pollIntervalMs);
+    }
 
-      console.log(
-        "[yoDEV-activation-redirect] Finish button found; scheduling redirect to " +
-          targetUrl +
-          " in " +
-          REDIRECT_DELAY_MS +
-          "ms"
-      );
-      clearInterval(intervalId);
-      try {
-        btn.setAttribute("href", targetUrl);
-      } catch (e) {
-        // Non-blocking
-      }
-      window.setTimeout(function () {
-        window.location.href = targetUrl;
-      }, REDIRECT_DELAY_MS);
-    }, pollIntervalMs);
-  }
+    // Sanity-log the settings as soon as the stylesheet is applied so we can
+    // confirm CSS-var interpolation worked, even on non-activation pages.
+    function logSettingsOnce() {
+      console.log("[yoDEV-activation-redirect] settings (from CSS vars):", readSettings());
+    }
 
-  // Primary: page-change event for SPA navigation + most initial loads
-  api.onPageChange(function (url) {
-    maybeHandleActivation(url);
-  });
-
-  // Fallback: also run once after script load in case onPageChange skips the
-  // initial server-rendered page load
-  window.setTimeout(function () {
-    maybeHandleActivation(window.location.pathname);
-  }, 100);
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", function () {
+        logSettingsOnce();
+        maybeHandleActivation();
+      });
+    } else {
+      logSettingsOnce();
+      maybeHandleActivation();
+    }
+  })();
 </script>

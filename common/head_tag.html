@@ -1,0 +1,68 @@
+<script type="text/discourse-plugin" version="1.10.0">
+  // yoDEV Activation Redirect
+  //
+  // After a user clicks an email activation link, Discourse renders a "Welcome"
+  // page with a "Finish" button that defaults to the Discourse home. This script
+  // overrides that button to point at the yoDEV homepage instead, and auto-clicks
+  // it after a short delay so users who don't click manually still end up at the
+  // right place.
+  //
+  // The homepage detects ?activated=1 and auto-starts OIDC sign-in, completing
+  // the signup → activation → tier-selection flow.
+
+  const HOMEPAGE_URL = settings.homepage_url;
+  const REDIRECT_DELAY_MS = parseInt(settings.redirect_delay_ms, 10) || 1500;
+  const WATCH_TIMEOUT_MS = parseInt(settings.watch_timeout_ms, 10) || 10000;
+
+  function buildTargetUrl() {
+    if (!HOMEPAGE_URL) return null;
+    // Strip any trailing slash so we don't end up with double slashes
+    return HOMEPAGE_URL.replace(/\/+$/, "") + "/?activated=1";
+  }
+
+  api.onPageChange((url) => {
+    if (!url || !url.startsWith("/u/activate-account/")) return;
+
+    const targetUrl = buildTargetUrl();
+    if (!targetUrl) {
+      console.warn(
+        "[yoDEV-activation-redirect] homepage_url theme setting is empty; not redirecting"
+      );
+      return;
+    }
+
+    // The activation page is rendered async (Ember route + template). Poll until
+    // the success indicator (Welcome / Finish button) appears, then override the
+    // destination and schedule the auto-redirect.
+    let elapsed = 0;
+    const pollIntervalMs = 200;
+    const intervalId = setInterval(() => {
+      elapsed += pollIntervalMs;
+      if (elapsed >= WATCH_TIMEOUT_MS) {
+        clearInterval(intervalId);
+        return;
+      }
+
+      // The Finish button has historically been #welcome-button; some Discourse
+      // versions render it as a primary button inside the activate-account view.
+      const btn = document.querySelector(
+        "#welcome-button, .activate-account .btn-primary, .activate-account a.btn"
+      );
+      if (!btn) return;
+
+      clearInterval(intervalId);
+
+      // Override the button so a manual click also lands on the homepage
+      try {
+        btn.setAttribute("href", targetUrl);
+      } catch (e) {
+        // Non-blocking; the auto-redirect below still runs
+      }
+
+      // Schedule the auto-redirect
+      window.setTimeout(() => {
+        window.location.href = targetUrl;
+      }, REDIRECT_DELAY_MS);
+    }, pollIntervalMs);
+  });
+</script>

@@ -1,0 +1,3 @@
+en:
+  theme_metadata:
+    description: "Redirects users from the Discourse account-activation success page back to the yoDEV homepage with ?activated=1 so the homepage can complete the OIDC sign-in and route the user to /plan-select."

@@ -1,0 +1,21 @@
+homepage_url:
+  type: string
+  default: ""
+  description:
+    en: "URL of the yoDEV homepage to redirect users to after email activation. Include protocol and host (e.g., https://www.yodev.dev or https://development.yodev.dev). The component appends ?activated=1 so the homepage can detect the post-activation arrival."
+
+redirect_delay_ms:
+  type: integer
+  default: 1500
+  min: 0
+  max: 10000
+  description:
+    en: "Milliseconds to wait after the activation success page renders before redirecting to the homepage. Long enough to see the success message, short enough not to feel stalled. 0 means redirect immediately."
+
+watch_timeout_ms:
+  type: integer
+  default: 10000
+  min: 1000
+  max: 60000
+  description:
+    en: "Maximum time to wait for the activation success indicator to appear before giving up (e.g., on failure pages). Default 10s."

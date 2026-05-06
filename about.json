@@ -1,0 +1,8 @@
+{
+  "name": "yoDEV Activation Redirect",
+  "about_url": "https://github.com/gwillis-inovacon/discourse-yodev-activation-redirect",
+  "license_url": "https://github.com/gwillis-inovacon/discourse-yodev-activation-redirect/blob/main/LICENSE",
+  "component": true,
+  "assets": {},
+  "color_schemes": {}
+}

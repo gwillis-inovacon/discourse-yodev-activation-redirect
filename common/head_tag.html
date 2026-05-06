@@ -87,11 +87,11 @@
         if (!welcomeBtn) return;
 
         console.log(
-          "[yoDEV-activation-redirect] #welcome-button found = activation complete; scheduling redirect to " +
+          "[yoDEV-activation-redirect] #welcome-button found = activation complete; redirecting to " +
             targetUrl +
-            " in " +
-            s.redirectDelayMs +
-            "ms"
+            (s.redirectDelayMs > 0
+              ? " in " + s.redirectDelayMs + "ms"
+              : " immediately")
         );
         clearInterval(intervalId);
         try {
@@ -99,9 +99,17 @@
         } catch (e) {
           // Non-blocking
         }
-        window.setTimeout(function () {
+        // Race: Discourse's welcome page has its own auto-redirect to /. If our
+        // delay is too long, Discourse navigates away before our setTimeout fires
+        // and our pending redirect never executes. With delay=0 we navigate
+        // synchronously and win.
+        if (s.redirectDelayMs > 0) {
+          window.setTimeout(function () {
+            window.location.href = targetUrl;
+          }, s.redirectDelayMs);
+        } else {
           window.location.href = targetUrl;
-        }, s.redirectDelayMs);
+        }
       }, pollIntervalMs);
     }
 

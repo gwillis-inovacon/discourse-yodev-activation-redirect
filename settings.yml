@@ -6,11 +6,11 @@ homepage_url:
 
 redirect_delay_ms:
   type: integer
-  default: 1500
+  default: 0
   min: 0
   max: 10000
   description:
-    en: "Milliseconds to wait after the activation success page renders before redirecting to the homepage. Long enough to see the success message, short enough not to feel stalled. 0 means redirect immediately."
+    en: "Milliseconds to wait after the activation success page renders before redirecting to the homepage. Default is 0 (redirect immediately) — Discourse's welcome page has its own auto-redirect to /, and any non-zero delay risks losing the race. Set higher only if you specifically want users to see the welcome message before redirect (and accept that some users will end up on the Discourse home instead)."
 
 watch_timeout_ms:
   type: integer

@@ -4,6 +4,7 @@
 
 :root {
   --yodev-activation-redirect-homepage-url: "#{$homepage_url}";
+  --yodev-activation-redirect-field-id: #{$homepage_redirect_field_id};
   --yodev-activation-redirect-delay-ms: #{$redirect_delay_ms};
   --yodev-activation-redirect-watch-timeout-ms: #{$watch_timeout_ms};
 }

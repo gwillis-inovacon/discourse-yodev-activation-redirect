@@ -31,9 +31,21 @@ Settings are passed from theme settings to the script via SCSS-generated CSS cus
 
 | Setting | Default | Description |
 |---|---|---|
-| `homepage_url` | _(empty)_ | Full URL of the yoDEV homepage app to redirect to. The component appends `/?activated=1`. If empty, the component logs a warning and does nothing. |
+| `homepage_redirect_field_id` | `0` | **PRIMARY source.** Numeric ID of a Discourse User Field that stores the per-signup homepage URL. The component reads `/session/current.json` after activation and looks up `current_user.custom_fields.user_field_<id>`. Requires that field's name (`user_field_<id>`) to be in Discourse's `public_user_custom_fields` site setting so the API exposes it. If `0` or the user has no value for the field, falls back to `homepage_url`. |
+| `homepage_url` | _(empty)_ | **FALLBACK.** Full URL of the yoDEV homepage app to redirect to when the per-signup field isn't set. The component appends `/?activated=1`. If both this and the per-signup field are empty, the component logs a warning and does nothing. |
 | `redirect_delay_ms` | `0` | Milliseconds to wait after detecting the activation flag before redirecting. Default `0` = immediate. Discourse's default post-activation behavior may navigate the user away within ~1s of landing on `/`, so any non-zero delay risks losing the race. |
 | `watch_timeout_ms` | `60000` | Maximum time the script polls for the Activate Account button to appear on the pre-activation page before giving up. Defaults to 60s to allow for slow Ember route rendering. |
+
+## Multi-environment setup (one Discourse instance serving multiple homepage URLs)
+
+The per-signup user field design lets a single Discourse instance redirect different signups to different homepage URLs — required when the same prod Discourse handles auth for both staging and prod (or any multi-env setup).
+
+**One-time Discourse admin setup:**
+
+1. **Create the User Field** at Admin → Customize → User Fields → Add User Field. Type = `text`. Required = no. Hidden = yes (admin-only — users don't need to see it). Note the numeric ID assigned to it (visible in the URL: `/admin/customize/user_fields/<id>`).
+2. **Expose it via the API** at Admin → Settings → search `public user custom fields` → add `user_field_<id>` to the list. Without this, `/session/current.json` will NOT include the field even when the user has a value set.
+3. **Configure the theme component** with `homepage_redirect_field_id` = `<id>`. Leave `homepage_url` blank (or set to a sensible global default for signups that don't go through your homepage app).
+4. **In the signup-originating app** (e.g., yoDEV homepage), set the user field when creating the user via Discourse's `/users.json` API: `formData.append("user_fields[<id>]", "<this homepage's URL>")`. The value is what the theme reads back at activation time.
 
 ## Console output
 

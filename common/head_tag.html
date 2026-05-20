@@ -40,6 +40,10 @@
     function readSettings() {
       return {
         homepageUrl: readCssVarString("--yodev-activation-redirect-homepage-url"),
+        redirectFieldId: readCssVarInt(
+          "--yodev-activation-redirect-field-id",
+          0
+        ),
         redirectDelayMs: readCssVarInt(
           "--yodev-activation-redirect-delay-ms",
           0
@@ -50,6 +54,65 @@
     function buildTargetUrl(homepageUrl) {
       if (!homepageUrl) return null;
       return homepageUrl.replace(/\/+$/, "") + "/?activated=1";
+    }
+
+    function performRedirect(targetUrl, delayMs) {
+      console.log(
+        "[yoDEV-activation-redirect] redirecting to " +
+          targetUrl +
+          (delayMs > 0 ? " in " + delayMs + "ms" : " immediately")
+      );
+      if (delayMs > 0) {
+        window.setTimeout(function () {
+          window.location.href = targetUrl;
+        }, delayMs);
+      } else {
+        window.location.href = targetUrl;
+      }
+    }
+
+    // Fetch the current user's per-signup redirect URL from a Discourse User
+    // Field. The field's numeric ID must be configured in theme settings AND
+    // the field's name (`user_field_<id>`) must be in Discourse's
+    // `public_user_custom_fields` site setting so that `/session/current.json`
+    // returns it. If fieldId is 0 or the lookup fails, callback(null) and the
+    // caller falls back to the global `homepage_url` setting.
+    function fetchPerUserRedirectUrl(fieldId, callback) {
+      if (!fieldId) {
+        callback(null);
+        return;
+      }
+      fetch("/session/current.json", { credentials: "same-origin" })
+        .then(function (res) {
+          if (!res.ok) {
+            console.log(
+              "[yoDEV-activation-redirect] /session/current.json status " +
+                res.status +
+                " — falling back to global setting"
+            );
+            return null;
+          }
+          return res.json();
+        })
+        .then(function (data) {
+          if (!data) {
+            callback(null);
+            return;
+          }
+          var key = "user_field_" + fieldId;
+          var url =
+            data.current_user &&
+            data.current_user.custom_fields &&
+            data.current_user.custom_fields[key];
+          callback(url || null);
+        })
+        .catch(function (e) {
+          console.warn(
+            "[yoDEV-activation-redirect] error fetching current user:",
+            e
+          );
+          callback(null);
+        });
     }
 
     function checkPendingFlag() {
@@ -91,33 +154,38 @@
       console.log(
         "[yoDEV-activation-redirect] activation flag detected (" +
           age +
-          "ms old); settings:",
+          "ms old); resolving target URL — settings:",
         s
       );
 
-      var targetUrl = buildTargetUrl(s.homepageUrl);
-      if (!targetUrl) {
-        console.warn(
-          "[yoDEV-activation-redirect] homepage_url empty; not redirecting"
-        );
-        return;
-      }
-
-      console.log(
-        "[yoDEV-activation-redirect] redirecting to " +
-          targetUrl +
-          (s.redirectDelayMs > 0
-            ? " in " + s.redirectDelayMs + "ms"
-            : " immediately")
-      );
-
-      if (s.redirectDelayMs > 0) {
-        window.setTimeout(function () {
-          window.location.href = targetUrl;
-        }, s.redirectDelayMs);
-      } else {
-        window.location.href = targetUrl;
-      }
+      // Per-signup field is primary; global homepage_url is fallback.
+      fetchPerUserRedirectUrl(s.redirectFieldId, function (perUserUrl) {
+        var homepageUrl = perUserUrl || s.homepageUrl;
+        if (perUserUrl) {
+          console.log(
+            "[yoDEV-activation-redirect] using per-signup user field value: " +
+              perUserUrl
+          );
+        } else if (s.homepageUrl) {
+          console.log(
+            "[yoDEV-activation-redirect] no per-signup value; using global homepage_url setting: " +
+              s.homepageUrl
+          );
+        } else {
+          console.warn(
+            "[yoDEV-activation-redirect] neither per-signup field nor global setting populated; not redirecting"
+          );
+          return;
+        }
+        var targetUrl = buildTargetUrl(homepageUrl);
+        if (!targetUrl) {
+          console.warn(
+            "[yoDEV-activation-redirect] could not build target URL; not redirecting"
+          );
+          return;
+        }
+        performRedirect(targetUrl, s.redirectDelayMs);
+      });
     }
 
     function setActivationFlag() {

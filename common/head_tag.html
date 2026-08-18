@@ -51,9 +51,70 @@
       };
     }
 
-    function buildTargetUrl(homepageUrl) {
+    // Hosts a per-signup value may point at. Anything else is discarded.
+    var ALLOWED_HOST = "yodev.dev";
+
+    function isAllowedHost(hostname) {
+      var h = (hostname || "").toLowerCase();
+      return h === ALLOWED_HOST || h.endsWith("." + ALLOWED_HOST);
+    }
+
+    /**
+     * Validate and normalise a redirect target (YOD-489).
+     *
+     * `homepageUrl` may come from user_field_5, which the USER WRITES AT SIGNUP
+     * — Discourse renders user fields on the signup form, and `editable: false`
+     * only freezes them afterwards. So this value is untrusted input that ends
+     * up in window.location.href.
+     *
+     * Two things this stops, neither of which the old trailing-slash trim did:
+     *
+     *   javascript: — assigning `javascript:…` to window.location EXECUTES it,
+     *   on the community origin, which is where the Discourse session that
+     *   drives SSO into worX and Workplace lives. Appending "/?activated=1"
+     *   does not neutralise it: a trailing `//` in the payload comments the
+     *   suffix out.
+     *
+     *   any other host — otherwise activation is a redirect to wherever the
+     *   signup form was told to send it.
+     *
+     * `trusted` is set for the admin-configured global setting: it still must
+     * be https, but it is not restricted to our own hosts, so the site can be
+     * pointed elsewhere deliberately without editing this file.
+     *
+     * Returns null when the value is unusable; the caller then falls back or
+     * declines to redirect, rather than navigating somewhere unexpected.
+     */
+    function buildTargetUrl(homepageUrl, trusted) {
       if (!homepageUrl) return null;
-      return homepageUrl.replace(/\/+$/, "") + "/?activated=1";
+
+      var url;
+      try {
+        url = new URL(homepageUrl);
+      } catch (err) {
+        // Not absolute, or not parseable — includes "javascript:alert(1)" with
+        // no host, and any relative path.
+        console.warn("[yoDEV-activation-redirect] unparseable redirect target; ignoring");
+        return null;
+      }
+
+      if (url.protocol !== "https:") {
+        console.warn(
+          "[yoDEV-activation-redirect] refusing non-https redirect target (" + url.protocol + ")"
+        );
+        return null;
+      }
+
+      if (!trusted && !isAllowedHost(url.hostname)) {
+        console.warn(
+          "[yoDEV-activation-redirect] refusing off-site redirect target (" + url.hostname + ")"
+        );
+        return null;
+      }
+
+      // Rebuild from the parsed URL rather than the raw string, so nothing the
+      // parser normalised away can survive into the assignment.
+      return url.origin + url.pathname.replace(/\/+$/, "") + "/?activated=1";
     }
 
     function performRedirect(targetUrl, delayMs) {
@@ -159,28 +220,41 @@
       );
 
       // Per-signup field is primary; global homepage_url is fallback.
+      //
+      // A per-signup value that fails validation falls THROUGH to the global
+      // setting rather than aborting (YOD-489). A user who typed rubbish into
+      // the signup form — or a bot that filled every field — should still land
+      // somewhere sensible; only the bad value is discarded, not the redirect.
       fetchPerUserRedirectUrl(s.redirectFieldId, function (perUserUrl) {
-        var homepageUrl = perUserUrl || s.homepageUrl;
+        var targetUrl = null;
+
         if (perUserUrl) {
-          console.log(
-            "[yoDEV-activation-redirect] using per-signup user field value: " +
-              perUserUrl
-          );
-        } else if (s.homepageUrl) {
-          console.log(
-            "[yoDEV-activation-redirect] no per-signup value; using global homepage_url setting: " +
-              s.homepageUrl
-          );
-        } else {
-          console.warn(
-            "[yoDEV-activation-redirect] neither per-signup field nor global setting populated; not redirecting"
-          );
-          return;
+          // Untrusted: written by the user at signup.
+          targetUrl = buildTargetUrl(perUserUrl, false);
+          if (targetUrl) {
+            console.log(
+              "[yoDEV-activation-redirect] using per-signup user field value: " + perUserUrl
+            );
+          } else {
+            console.warn(
+              "[yoDEV-activation-redirect] per-signup value rejected; falling back to global setting"
+            );
+          }
         }
-        var targetUrl = buildTargetUrl(homepageUrl);
+
+        if (!targetUrl && s.homepageUrl) {
+          // Trusted: admin-configured theme setting.
+          targetUrl = buildTargetUrl(s.homepageUrl, true);
+          if (targetUrl) {
+            console.log(
+              "[yoDEV-activation-redirect] using global homepage_url setting: " + s.homepageUrl
+            );
+          }
+        }
+
         if (!targetUrl) {
           console.warn(
-            "[yoDEV-activation-redirect] could not build target URL; not redirecting"
+            "[yoDEV-activation-redirect] no usable redirect target; not redirecting"
           );
           return;
         }

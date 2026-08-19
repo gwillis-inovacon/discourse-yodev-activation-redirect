@@ -2,15 +2,13 @@ homepage_url:
   type: string
   default: ""
   description:
-    en: "FALLBACK destination — used only when the per-signup user field below is empty or not exposed. Full URL of the yoDEV homepage app (NOT the Discourse host) where users should be sent after email activation. The component appends /?activated=1 so the homepage's App.tsx handler can detect the post-activation arrival and auto-start OIDC. Recommended PRIMARY source is the per-signup user field — leave this blank if every signup sets that field."
+    en: "Destination — full URL of the yoDEV homepage app (NOT the Discourse host) where homepage-originated signups are sent after email activation. The component appends /?activated=1 so the homepage's App.tsx handler can detect the post-activation arrival and auto-start OIDC. Leave blank to disable the redirect entirely."
 
-homepage_redirect_field_id:
-  type: integer
-  default: 0
-  min: 0
-  max: 1000
+homepage_signup_group:
+  type: string
+  default: "homepage_signup"
   description:
-    en: "PRIMARY source — numeric ID of the Discourse User Field that stores the per-signup homepage URL (set by the homepage app at signup time). The component reads /session/current.json after activation, looks up current_user.custom_fields.user_field_<this-id>, and redirects there. If unset (0) or the user has no value for the field, falls back to the homepage_url setting above. Required for multi-environment Discourse instances (one Discourse, multiple homepage URLs)."
+    en: "Name of the Discourse group the homepage app adds its own signups to. ONLY members of this group are redirected after activation — everyone else stays on the community, which is what a direct community signup asked for. The group must be visible to its members (visibility_level 2) or /session/current.json will not report it and no one will ever be redirected. Leave blank to redirect every activation regardless of origin (the pre-YOD-497 behaviour; not recommended)."
 
 redirect_delay_ms:
   type: integer

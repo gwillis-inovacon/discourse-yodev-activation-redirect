@@ -40,10 +40,7 @@
     function readSettings() {
       return {
         homepageUrl: readCssVarString("--yodev-activation-redirect-homepage-url"),
-        redirectFieldId: readCssVarInt(
-          "--yodev-activation-redirect-field-id",
-          0
-        ),
+        signupGroup: readCssVarString("--yodev-activation-redirect-signup-group"),
         redirectDelayMs: readCssVarInt(
           "--yodev-activation-redirect-delay-ms",
           0
@@ -51,41 +48,21 @@
       };
     }
 
-    // Hosts a per-signup value may point at. Anything else is discarded.
-    var ALLOWED_HOST = "yodev.dev";
-
-    function isAllowedHost(hostname) {
-      var h = (hostname || "").toLowerCase();
-      return h === ALLOWED_HOST || h.endsWith("." + ALLOWED_HOST);
-    }
-
     /**
-     * Validate and normalise a redirect target (YOD-489).
+     * Validate and normalise the redirect target.
      *
-     * `homepageUrl` may come from user_field_5, which the USER WRITES AT SIGNUP
-     * — Discourse renders user fields on the signup form, and `editable: false`
-     * only freezes them afterwards. So this value is untrusted input that ends
-     * up in window.location.href.
+     * The target is now only ever the admin-configured theme setting (YOD-497
+     * removed the per-signup user field that used to feed this), so the host
+     * allowlist YOD-489 needed is gone — an admin may legitimately point the
+     * site anywhere. The https check stays: it costs nothing and it still stops
+     * a `javascript:` value, which assigning to window.location would EXECUTE on
+     * the community origin, where the Discourse session driving SSO into worX
+     * and Workplace lives.
      *
-     * Two things this stops, neither of which the old trailing-slash trim did:
-     *
-     *   javascript: — assigning `javascript:…` to window.location EXECUTES it,
-     *   on the community origin, which is where the Discourse session that
-     *   drives SSO into worX and Workplace lives. Appending "/?activated=1"
-     *   does not neutralise it: a trailing `//` in the payload comments the
-     *   suffix out.
-     *
-     *   any other host — otherwise activation is a redirect to wherever the
-     *   signup form was told to send it.
-     *
-     * `trusted` is set for the admin-configured global setting: it still must
-     * be https, but it is not restricted to our own hosts, so the site can be
-     * pointed elsewhere deliberately without editing this file.
-     *
-     * Returns null when the value is unusable; the caller then falls back or
-     * declines to redirect, rather than navigating somewhere unexpected.
+     * Returns null when the value is unusable, so the caller declines to
+     * redirect rather than navigating somewhere unexpected.
      */
-    function buildTargetUrl(homepageUrl, trusted) {
+    function buildTargetUrl(homepageUrl) {
       if (!homepageUrl) return null;
 
       var url;
@@ -101,13 +78,6 @@
       if (url.protocol !== "https:") {
         console.warn(
           "[yoDEV-activation-redirect] refusing non-https redirect target (" + url.protocol + ")"
-        );
-        return null;
-      }
-
-      if (!trusted && !isAllowedHost(url.hostname)) {
-        console.warn(
-          "[yoDEV-activation-redirect] refusing off-site redirect target (" + url.hostname + ")"
         );
         return null;
       }
@@ -132,24 +102,46 @@
       }
     }
 
-    // Fetch the current user's per-signup redirect URL from a Discourse User
-    // Field. The field's numeric ID must be configured in theme settings AND
-    // the field's name (`user_field_<id>`) must be in Discourse's
-    // `public_user_custom_fields` site setting so that `/session/current.json`
-    // returns it. If fieldId is 0 or the lookup fails, callback(null) and the
-    // caller falls back to the global `homepage_url` setting.
-    function fetchPerUserRedirectUrl(fieldId, callback) {
-      if (!fieldId) {
-        callback(null);
+    /**
+     * Did this account come from the homepage app? YOD-497.
+     *
+     * The homepage adds every account it creates to a Discourse group; this
+     * reads that group back off `/session/current.json`. Accounts without it
+     * signed up on the community directly and must NOT be pulled away to a plan
+     * chooser — that is the whole defect this gate exists to close.
+     *
+     * A group rather than a user field on purpose: user fields render on
+     * Discourse's own signup form (YOD-487), so a direct signup could forge its
+     * own origin by filling one in. Group membership is admin-API only. It also
+     * survives activating on a different device from the one that signed up,
+     * which the localStorage handoff below does not.
+     *
+     * Calls back false on any failure — a broken read leaves the user on the
+     * community, which is the safe direction to fail. Redirecting on a failed
+     * check would reinstate the bug for everyone the moment this call breaks.
+     *
+     * ⚠️ The group must be visible to its own members (visibility_level 2).
+     * Discourse omits groups the requester cannot see from current_user.groups,
+     * so a too-private group reads as "nobody is a member" and silently
+     * disables the redirect for everyone.
+     */
+    function fetchIsHomepageSignup(groupName, callback) {
+      if (!groupName) {
+        // Group gating switched off — every activation redirects, the
+        // pre-YOD-497 behaviour. Deliberate opt-out, not a default.
+        console.log(
+          "[yoDEV-activation-redirect] no signup group configured; redirecting regardless of origin"
+        );
+        callback(true);
         return;
       }
       fetch("/session/current.json", { credentials: "same-origin" })
         .then(function (res) {
           if (!res.ok) {
-            console.log(
+            console.warn(
               "[yoDEV-activation-redirect] /session/current.json status " +
                 res.status +
-                " — falling back to global setting"
+                " — cannot confirm origin; staying on the community"
             );
             return null;
           }
@@ -157,22 +149,34 @@
         })
         .then(function (data) {
           if (!data) {
-            callback(null);
+            callback(false);
             return;
           }
-          var key = "user_field_" + fieldId;
-          var url =
-            data.current_user &&
-            data.current_user.custom_fields &&
-            data.current_user.custom_fields[key];
-          callback(url || null);
+          var groups =
+            (data.current_user && data.current_user.groups) || [];
+          var isMember = groups.some(function (g) {
+            return g && g.name === groupName;
+          });
+          console.log(
+            "[yoDEV-activation-redirect] groups: [" +
+              groups
+                .map(function (g) {
+                  return g && g.name;
+                })
+                .join(", ") +
+              "] — member of '" +
+              groupName +
+              "': " +
+              isMember
+          );
+          callback(isMember);
         })
         .catch(function (e) {
           console.warn(
-            "[yoDEV-activation-redirect] error fetching current user:",
+            "[yoDEV-activation-redirect] error fetching current user; staying on the community:",
             e
           );
-          callback(null);
+          callback(false);
         });
     }
 
@@ -219,39 +223,17 @@
         s
       );
 
-      // Per-signup field is primary; global homepage_url is fallback.
-      //
-      // A per-signup value that fails validation falls THROUGH to the global
-      // setting rather than aborting (YOD-489). A user who typed rubbish into
-      // the signup form — or a bot that filled every field — should still land
-      // somewhere sensible; only the bad value is discarded, not the redirect.
-      fetchPerUserRedirectUrl(s.redirectFieldId, function (perUserUrl) {
-        var targetUrl = null;
-
-        if (perUserUrl) {
-          // Untrusted: written by the user at signup.
-          targetUrl = buildTargetUrl(perUserUrl, false);
-          if (targetUrl) {
-            console.log(
-              "[yoDEV-activation-redirect] using per-signup user field value: " + perUserUrl
-            );
-          } else {
-            console.warn(
-              "[yoDEV-activation-redirect] per-signup value rejected; falling back to global setting"
-            );
-          }
+      // Only accounts the homepage created get pulled back to it (YOD-497).
+      // Everyone else signed up on the community and stays there.
+      fetchIsHomepageSignup(s.signupGroup, function (isHomepageSignup) {
+        if (!isHomepageSignup) {
+          console.log(
+            "[yoDEV-activation-redirect] not a homepage signup; staying on the community"
+          );
+          return;
         }
 
-        if (!targetUrl && s.homepageUrl) {
-          // Trusted: admin-configured theme setting.
-          targetUrl = buildTargetUrl(s.homepageUrl, true);
-          if (targetUrl) {
-            console.log(
-              "[yoDEV-activation-redirect] using global homepage_url setting: " + s.homepageUrl
-            );
-          }
-        }
-
+        var targetUrl = buildTargetUrl(s.homepageUrl);
         if (!targetUrl) {
           console.warn(
             "[yoDEV-activation-redirect] no usable redirect target; not redirecting"

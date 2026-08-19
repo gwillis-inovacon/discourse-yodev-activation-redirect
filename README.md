@@ -16,7 +16,11 @@ The community is a signup door in its own right. Someone who creates an account 
 
 The original design discriminated with a per-signup User Field holding the destination URL, falling back to a global setting when it was empty. On production that field was never populated, so **every** activation hit the fallback and every new account was redirected regardless of origin. That fallback is gone.
 
-Origin is now carried by **group membership**: the homepage adds each account it creates to a Discourse group, and this component redirects only members. Chosen over the user field for two reasons — user fields render on Discourse's own signup form and can be self-asserted by whoever fills them in (YOD-487), so a field lets a direct signup forge its origin; and group membership works when the user signs up on a desktop and opens the activation email on their phone, which the localStorage handoff below does not.
+Origin is now carried by **group membership**: the homepage adds each account it creates to a Discourse group, and this component redirects only members. Chosen over the user field for two reasons.
+
+First, user fields are settable by whoever is registering. They are not on the rendered signup form — but Discourse's public `POST /users.json` accepts `user_fields[N]` regardless of what the form displayed, and `/site.json` enumerates every field id to unauthenticated callers, so a script can supply any of them (YOD-487). A field would therefore let a direct signup declare itself a homepage signup. Group membership can only be set with the admin API.
+
+Second, group membership survives the user signing up on a desktop and activating on their phone, which the localStorage handoff below does not.
 
 ## How it works
 
@@ -56,9 +60,11 @@ Settings are passed from theme settings to the script via SCSS-generated CSS cus
 Without this the component redirects nobody, because no account is ever a member.
 
 1. **Create the group** at Admin → Groups → New. Name it `homepage_signup` (or whatever you set `homepage_signup_group` to).
-2. ⚠️ **Set its visibility to "Logged-on users" (`visibility_level` 2).** Discourse omits groups the requester cannot see from `current_user.groups`, so a more private group reads back as "nobody is a member" and silently disables the redirect for everyone — with no error anywhere. This bit the tier groups before; it is not specific to this component.
-3. **Owner/membership settings**: nobody needs to request or join it — the homepage adds members via the admin API. Leave "Allow users to join freely" off.
-4. The homepage does the rest: `tagHomepageSignup()` in `server-shared.ts` adds each account it creates, best-effort, right after `/api/signup` succeeds.
+2. ⚠️ **"Who can see this group?" → "Group owners, members and moderators"** — `visibility_level` **2**, the *third* option in the dropdown, not the second. Discourse omits groups the requester cannot see from `current_user.groups`, so anything more private reads back as "nobody is a member" and silently disables the redirect for everyone, with no error anywhere. `Everyone` (0) and `Logged on users` (1) also work but expose the group for no benefit. This bit the tier groups before; it is not specific to this component.
+3. **"How can users join?" → Invite only.** The homepage adds members through the admin API, which ignores this setting — but free-to-join would let a community signup add *itself* and forge its origin, which is precisely what using a group instead of a user field is meant to prevent.
+4. **"Who can see this group's members?" → "Group owners and moderators"** (`members_visibility_level` 4). The component only ever reads the current user's own group list, never the roster.
+5. **Owners are optional.** Admins can manage any group, and members can see a `visibility_level` 2 group whether or not an owner is defined.
+6. The homepage does the rest: `tagHomepageSignup()` in `server-shared.ts` adds each account it creates, best-effort, right after `/api/signup` succeeds.
 
 Verify with a real signup on each door and watch the browser console for `[yoDEV-activation-redirect] groups: [...]`.
 

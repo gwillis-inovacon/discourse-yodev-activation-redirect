@@ -110,11 +110,14 @@
      * signed up on the community directly and must NOT be pulled away to a plan
      * chooser — that is the whole defect this gate exists to close.
      *
-     * A group rather than a user field on purpose: user fields render on
-     * Discourse's own signup form (YOD-487), so a direct signup could forge its
-     * own origin by filling one in. Group membership is admin-API only. It also
-     * survives activating on a different device from the one that signed up,
-     * which the localStorage handoff below does not.
+     * A group rather than a user field on purpose. User fields are not on the
+     * rendered signup form, but Discourse's public POST /users.json accepts
+     * user_fields[N] whatever the form showed, and /site.json enumerates every
+     * field id to anonymous callers — so a script can set any of them at
+     * registration (YOD-487). A field would let a direct signup declare itself
+     * a homepage signup. Group membership is admin-API only. It also survives
+     * activating on a different device from the one that signed up, which the
+     * localStorage handoff below does not.
      *
      * Calls back false on any failure — a broken read leaves the user on the
      * community, which is the safe direction to fail. Redirecting on a failed

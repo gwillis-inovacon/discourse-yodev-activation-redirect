@@ -226,6 +226,25 @@
         s
       );
 
+      // A social signup (YOD-556) is never added to homepage_signup_group —
+      // it never calls the homepage's /api/signup — so the group check would
+      // always fail it. The marker that armed this flag already proved the
+      // homepage origin, so honour that instead of re-testing it.
+      if (data.social) {
+        var socialTarget = buildTargetUrl(s.homepageUrl);
+        if (!socialTarget) {
+          console.warn(
+            "[yoDEV-activation-redirect] social flag set but no usable redirect target; not redirecting"
+          );
+          return;
+        }
+        console.log(
+          "[yoDEV-activation-redirect] social signup completed; returning to the homepage"
+        );
+        performRedirect(socialTarget, s.redirectDelayMs);
+        return;
+      }
+
       // Only accounts the homepage created get pulled back to it (YOD-497).
       // Everyone else signed up on the community and stays there.
       fetchIsHomepageSignup(s.signupGroup, function (isHomepageSignup) {
@@ -247,11 +266,13 @@
       });
     }
 
-    function setActivationFlag() {
+    function setActivationFlag(extra) {
       try {
         localStorage.setItem(
           FLAG_KEY,
-          JSON.stringify({ timestamp: Date.now() })
+          JSON.stringify(
+            Object.assign({ timestamp: Date.now() }, extra || {})
+          )
         );
         console.log(
           "[yoDEV-activation-redirect] activation flag set; will redirect on next page load"
@@ -330,23 +351,37 @@
     // ── Social signup (YOD-556) ──────────────────────────────────────────
     //
     // A social signup has no activation page and no activation email — the
-    // provider already verified the address — so nothing ever sets the
-    // localStorage flag above and checkPendingFlag() can never fire for it.
+    // provider already verified the address — so nothing sets the localStorage
+    // flag and checkPendingFlag() can never fire for it.
     //
-    // Instead the homepage sends visitors to
+    // The homepage sends visitors to
     //   www.yodev.dev/auth/<provider>?origin=/%3Fyodev_signup=1
     // Discourse's valid_origin? accepts a host-less path (it rejects foreign
     // hosts and keeps only path+query), so after the provider round-trip it
-    // returns them to /?yodev_signup=1 here. That marker is the trigger.
+    // returns them to /?yodev_signup=1 here.
     //
-    // ⚠️ This path deliberately SKIPS the homepage_signup_group check. That
-    // check exists to prove a signup originated from the homepage; the marker
-    // proves the same thing more directly, and a social signup is never added
-    // to the group because it never touches the homepage's /api/signup.
+    // ⚠️ THE MARKER DOES NOT MEAN "LOGGED IN".
     //
-    // The redirect target comes from settings, never from the URL, so a
-    // hand-typed marker cannot redirect anyone anywhere but the configured
-    // homepage.
+    // For a NEW account Discourse does not create it automatically. It renders
+    // the create-account modal ("¡Hola!", email pre-verified by the provider,
+    // username suggested) OVER the origin route and waits for the visitor to
+    // press Registrarse. The first version of this redirected the moment it saw
+    // the marker, which navigated away mid-modal and destroyed the signup: the
+    // account was never created, so the homepage's OIDC round-trip then found
+    // no session and dumped the visitor on /login.
+    //
+    // So: redirect only if a session already exists (an existing account
+    // signing in). Otherwise leave the visitor on the modal and hand off to the
+    // flag, which fires on the page load that follows Registrarse.
+    //
+    // ⚠️ This path deliberately skips the homepage_signup_group check. That
+    // check proves a signup came from the homepage; the marker proves the same
+    // thing directly, and a social signup is never added to the group because
+    // it never calls the homepage's /api/signup. `social: true` carries that
+    // exemption across the handoff.
+    //
+    // The redirect target always comes from settings, never from the URL, so a
+    // hand-typed marker cannot send anyone anywhere but the configured homepage.
     function checkSocialSignupMarker() {
       var params;
       try {
@@ -356,7 +391,7 @@
       }
       if (params.get("yodev_signup") !== "1") return false;
 
-      // Strip the marker so a refresh or a back-navigation cannot re-fire it.
+      // Strip the marker so a refresh or back-navigation cannot re-fire it.
       try {
         params.delete("yodev_signup");
         var qs = params.toString();
@@ -367,19 +402,42 @@
         );
       } catch (e) {}
 
-      var s = readSettings();
-      var targetUrl = buildTargetUrl(s.homepageUrl);
-      if (!targetUrl) {
-        console.warn(
-          "[yoDEV-activation-redirect] social signup marker seen but no usable redirect target; staying put"
-        );
-        return false;
-      }
+      fetch("/session/current.json", { credentials: "same-origin" })
+        .then(function (res) {
+          return res.ok ? res.json() : null;
+        })
+        .then(function (data) {
+          var signedIn = !!(data && data.current_user);
+          if (!signedIn) {
+            // Mid-signup: the create-account modal is open. Do not touch the
+            // page. Arm the flag so the load after Registrarse redirects.
+            console.log(
+              "[yoDEV-activation-redirect] social marker seen but no session yet — create-account modal is open; arming flag instead of redirecting"
+            );
+            setActivationFlag({ social: true });
+            return;
+          }
+          var s = readSettings();
+          var targetUrl = buildTargetUrl(s.homepageUrl);
+          if (!targetUrl) {
+            console.warn(
+              "[yoDEV-activation-redirect] social marker seen but no usable redirect target; staying put"
+            );
+            return;
+          }
+          console.log(
+            "[yoDEV-activation-redirect] social sign-in complete; returning to the homepage"
+          );
+          performRedirect(targetUrl, s.redirectDelayMs);
+        })
+        .catch(function (err) {
+          console.warn(
+            "[yoDEV-activation-redirect] could not check session for social marker:",
+            err
+          );
+        });
 
-      console.log(
-        "[yoDEV-activation-redirect] social signup marker detected; returning to the homepage"
-      );
-      performRedirect(targetUrl, s.redirectDelayMs);
+      // Always true: the marker was ours to consume, whatever we decided.
       return true;
     }
 

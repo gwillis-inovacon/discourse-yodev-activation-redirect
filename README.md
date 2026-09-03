@@ -104,6 +104,25 @@ passes. After the provider round-trip Discourse returns the visitor to
 `homepage_url/?activated=1` the activation path uses, which the homepage
 already handles by starting OIDC.
 
+### ⚠️ The marker does not mean "logged in"
+
+For a **new** account Discourse does not create it automatically. It renders the
+create-account modal — *"¡Hola!"*, email pre-verified by the provider, username
+suggested — **over the origin route**, and waits for the visitor to press
+*Registrarse*.
+
+The first version of this redirected the moment it saw the marker, which
+navigated away mid-modal and destroyed the signup: no account was created, so
+the homepage's OIDC round-trip found no session and dumped the visitor on
+`/login`.
+
+So the marker handler checks `/session/current.json` first:
+
+* **session exists** (an existing account signing in) → redirect now
+* **no session** (create-account modal open) → leave the page alone and arm the
+  activation flag with `social: true`, which fires on the page load after
+  *Registrarse*
+
 Two deliberate differences from the activation path:
 
 * **`homepage_signup_group` is not checked.** That check exists to prove a

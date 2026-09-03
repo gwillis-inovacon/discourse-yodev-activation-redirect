@@ -8,3 +8,65 @@
   --yodev-activation-redirect-delay-ms: #{$redirect_delay_ms};
   --yodev-activation-redirect-watch-timeout-ms: #{$watch_timeout_ms};
 }
+
+// YOD-559 — the provider interstitial at /auth/<provider>.
+//
+// Every visitor who picks a social button on the homepage passes through this
+// page. Greg, 2026-09-03: "It looks awful."
+//
+// ## It cannot be skipped, and should not be
+//
+// `GET /auth/<provider>` deliberately does NOT start the OAuth flow. It renders
+// this page carrying a POST form and an `authenticity_token`; only that POST
+// reaches the provider. Without it, any site could silently begin an auth flow
+// in a visitor's browser — it is login-CSRF protection. The token is bound to
+// the Discourse session, so an external origin cannot POST straight through.
+// There is no site setting to disable it (checked every auth-related one).
+//
+// ## Why CSS is the whole toolkit here
+//
+// The page is `<body class="no-ember">` — server-rendered, so theme JS never
+// runs and nothing can be restructured. But `data-target="common_theme"` IS in
+// its stylesheet list, so this file reaches it. Markup is stable BEM
+// (`.omniauth-confirm__logo` / `__title` / `__card`), which is what makes the
+// rules below safe to hang on.
+//
+// ⚠️ Untranslated by Discourse, NOT fixable here: the page is `lang="es"` yet
+// the title, subtitle and footer render in English (only the button is
+// translated). Those strings need admin → Customize → Text overrides — search
+// the English source string, e.g. "You will be redirected to".
+
+body.no-ember:has(.omniauth-confirm) {
+  // The launch-offer banner does not belong mid-authentication. It also spans
+  // the full width, left-aligned, above a narrow centred card — that mismatch
+  // was doing most of the visual damage.
+  .yodev-beta-banner {
+    display: none;
+  }
+}
+
+.omniauth-confirm {
+  // Discourse stretches this to the viewport, which strands the card in the
+  // middle of a tall empty column once the banner is gone.
+  min-height: 0;
+  max-width: 460px;
+  padding: 5rem 1rem 4rem;
+
+  &__logo {
+    // The stock mark is DISCOURSE's logo — another product's brand shown to
+    // someone mid-signup to yoDEV. Replaced, not merely hidden.
+    //
+    // Served as a THEME ASSET, never a forum upload URL: forum uploads are
+    // garbage-collected once unreferenced, and the failure would be a silently
+    // broken image on the one page every social signup crosses.
+    height: 48px;
+    width: 100%;
+    margin: 0 auto 1.75rem;
+    // 144x100 mark — size by height so it is not shrunk to fit a wide box.
+    background: url($yodev_logo) center / auto 48px no-repeat;
+
+    svg {
+      display: none;
+    }
+  }
+}

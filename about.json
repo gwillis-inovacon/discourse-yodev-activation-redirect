@@ -3,6 +3,8 @@
   "about_url": "https://github.com/gwillis-inovacon/discourse-yodev-activation-redirect",
   "license_url": "https://github.com/gwillis-inovacon/discourse-yodev-activation-redirect/blob/main/LICENSE",
   "component": true,
-  "assets": {},
+  "assets": {
+    "yodev_logo": "assets/yodev-logo.png"
+  },
   "color_schemes": {}
 }

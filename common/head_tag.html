@@ -327,9 +327,70 @@
       }, pollInterval);
     }
 
+    // ── Social signup (YOD-556) ──────────────────────────────────────────
+    //
+    // A social signup has no activation page and no activation email — the
+    // provider already verified the address — so nothing ever sets the
+    // localStorage flag above and checkPendingFlag() can never fire for it.
+    //
+    // Instead the homepage sends visitors to
+    //   www.yodev.dev/auth/<provider>?origin=/%3Fyodev_signup=1
+    // Discourse's valid_origin? accepts a host-less path (it rejects foreign
+    // hosts and keeps only path+query), so after the provider round-trip it
+    // returns them to /?yodev_signup=1 here. That marker is the trigger.
+    //
+    // ⚠️ This path deliberately SKIPS the homepage_signup_group check. That
+    // check exists to prove a signup originated from the homepage; the marker
+    // proves the same thing more directly, and a social signup is never added
+    // to the group because it never touches the homepage's /api/signup.
+    //
+    // The redirect target comes from settings, never from the URL, so a
+    // hand-typed marker cannot redirect anyone anywhere but the configured
+    // homepage.
+    function checkSocialSignupMarker() {
+      var params;
+      try {
+        params = new URLSearchParams(window.location.search);
+      } catch (e) {
+        return false;
+      }
+      if (params.get("yodev_signup") !== "1") return false;
+
+      // Strip the marker so a refresh or a back-navigation cannot re-fire it.
+      try {
+        params.delete("yodev_signup");
+        var qs = params.toString();
+        window.history.replaceState(
+          {},
+          "",
+          window.location.pathname + (qs ? "?" + qs : "")
+        );
+      } catch (e) {}
+
+      var s = readSettings();
+      var targetUrl = buildTargetUrl(s.homepageUrl);
+      if (!targetUrl) {
+        console.warn(
+          "[yoDEV-activation-redirect] social signup marker seen but no usable redirect target; staying put"
+        );
+        return false;
+      }
+
+      console.log(
+        "[yoDEV-activation-redirect] social signup marker detected; returning to the homepage"
+      );
+      performRedirect(targetUrl, s.redirectDelayMs);
+      return true;
+    }
+
     function init() {
       var s = readSettings();
       console.log("[yoDEV-activation-redirect] settings (from CSS vars):", s);
+
+      // A social signup returns with a marker instead of an activation flag,
+      // and it is mutually exclusive with the flag path — check it first and
+      // stop if it fires.
+      if (checkSocialSignupMarker()) return;
 
       // First: did we just complete activation and land here? Redirect.
       checkPendingFlag();

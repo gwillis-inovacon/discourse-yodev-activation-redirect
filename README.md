@@ -83,3 +83,35 @@ Built and tested against Discourse `v2026.5.0-latest` with Ember `v6.10.1`. Olde
 ## Removal
 
 Disable or uninstall the component in Discourse admin → Customize → Components. The localStorage flag is short-lived (5 min expiry) and will clean itself up; no persistent state to manually remove.
+
+## Social signup return path (YOD-556)
+
+A second, independent trigger. Social signups (Google / GitHub / LinkedIn) have
+**no activation page and no activation email** — the provider already verified
+the address — so nothing sets the `yodev_activation_pending` flag and the
+activation path can never fire for them.
+
+The homepage instead links to:
+
+```
+https://www.yodev.dev/auth/<provider>?origin=%2F%3Fyodev_signup%3D1
+```
+
+Discourse's `valid_origin?` rejects a foreign host and keeps only `path+query`,
+so an absolute URL back to the homepage is useless — but a **host-less path**
+passes. After the provider round-trip Discourse returns the visitor to
+`/?yodev_signup=1`, this component sees the marker and sends them to the same
+`homepage_url/?activated=1` the activation path uses, which the homepage
+already handles by starting OIDC.
+
+Two deliberate differences from the activation path:
+
+* **`homepage_signup_group` is not checked.** That check exists to prove a
+  signup came from the homepage. The marker proves it directly, and a social
+  signup is never in the group because it never calls the homepage's
+  `/api/signup`.
+* **The marker is stripped** via `history.replaceState` before redirecting, so
+  a refresh or back-navigation cannot re-fire it.
+
+The redirect target always comes from settings, never from the URL, so a
+hand-typed marker cannot send anyone anywhere but the configured homepage.

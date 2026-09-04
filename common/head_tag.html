@@ -22,6 +22,41 @@
     var FLAG_KEY = "yodev_activation_pending";
     var FLAG_MAX_AGE_MS = 5 * 60 * 1000; // 5 minutes
 
+    /**
+     * YOD-564: "this visitor is mid-signup, having come from the homepage".
+     *
+     * Read by the yodev-beta-offer component, which must NOT pitch the launch
+     * offer to someone who just read it on the homepage and clicked through to
+     * act on it. Its own suppression only covers /signup and /login, and this
+     * flow never visits either — the create-account modal renders over
+     * `/?yodev_signup=1`, pathname `/`.
+     *
+     * ⚠️ It is a sessionStorage HANDOFF rather than the beta-offer component
+     * reading the URL itself, because checkSocialSignupMarker() strips the
+     * marker with replaceState the moment it runs. Both components are
+     * head_tag scripts with no guaranteed order, so a URL read over there
+     * would win or lose the race depending on load timing — the worst kind of
+     * bug to reproduce.
+     *
+     * sessionStorage, not localStorage: suppression should last this signup,
+     * not forever. Someone browsing the community next week should still be
+     * able to see the offer.
+     *
+     * ⚠️ The literal is duplicated in discourse-yodev-beta-offer. Two theme
+     * components cannot share a module; changing it here means changing it
+     * there in the same breath.
+     */
+    var HOMEPAGE_SIGNUP_KEY = "yodev_homepage_signup";
+
+    function markHomepageSignup() {
+      try {
+        sessionStorage.setItem(HOMEPAGE_SIGNUP_KEY, "1");
+      } catch (e) {
+        // Private mode or blocked storage. The offer showing is a papercut,
+        // not a failure — never let this break the redirect it sits beside.
+      }
+    }
+
     function readCssVarString(name) {
       var v = (
         getComputedStyle(document.documentElement).getPropertyValue(name) || ""
@@ -267,6 +302,10 @@
     }
 
     function setActivationFlag(extra) {
+      // YOD-564: arming this flag is the other proof of a homepage-originated
+      // signup, and the ONLY one on the email path — that journey carries no
+      // URL marker, it arrives when the visitor clicks Activate Account.
+      markHomepageSignup();
       try {
         localStorage.setItem(
           FLAG_KEY,
@@ -390,6 +429,11 @@
         return false;
       }
       if (params.get("yodev_signup") !== "1") return false;
+
+      // YOD-564: hand the fact to the beta-offer component BEFORE the strip
+      // below destroys the evidence. Order matters — the replaceState is two
+      // statements away.
+      markHomepageSignup();
 
       // Strip the marker so a refresh or back-navigation cannot re-fire it.
       try {
